@@ -1,0 +1,6 @@
+hcloud
+python-dotenv
+pyTelegramBotAPI
+rich
+pandas
+matplotlib
