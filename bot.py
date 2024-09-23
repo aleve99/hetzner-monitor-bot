@@ -26,6 +26,8 @@ bot = telebot.TeleBot(
     parse_mode="MARKDOWN"
 )
 
+chat_id = int(config['TELEGRAM_CHAT_ID'])
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
@@ -38,7 +40,8 @@ server = hetzner_client.servers.get_by_name(config["SERVER_NAME"])
 
 @bot.message_handler(commands=["start", "help"])
 def send_welcome(message: telebot.types.Message):
-    bot.send_message(message.from_user.id, f"user chat id: {message.from_user.id}")
+    if message.from_user.id == chat_id:
+        bot.send_message(chat_id, "Bot running!")
 
 def get_cpu_load(
     server: BoundServer, 
