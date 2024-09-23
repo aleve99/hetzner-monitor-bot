@@ -67,8 +67,12 @@ cpu_stats_update_markup.row(
 
 cpu_plot_markup = types.InlineKeyboardMarkup()
 cpu_plot_markup.row(
+    types.InlineKeyboardButton(text="5m", callback_data="cpuplot_5m"),
+    types.InlineKeyboardButton(text="10m", callback_data="cpuplot_10m"),
     types.InlineKeyboardButton(text="30m", callback_data="cpuplot_30m"),
     types.InlineKeyboardButton(text="1h", callback_data="cpuplot_1h"),
+)
+cpu_plot_markup.row(
     types.InlineKeyboardButton(text="3h", callback_data="cpuplot_3h"),
     types.InlineKeyboardButton(text="6h", callback_data="cpuplot_6h"),
     types.InlineKeyboardButton(text="12h", callback_data="cpuplot_12h"),
@@ -199,11 +203,11 @@ def monitor_cpu():
     step = lookback_period_s // MAX_METRICS_VALUES
 
     while RUNNING:
-        past_end = datetime.now().astimezone()
-        past_start = past_end - timedelta(seconds=lookback_period_s)
+        end = datetime.now().astimezone()
+        start = end - timedelta(seconds=lookback_period_s)
 
         try:
-            load = get_cpu_load(past_start, past_end, step=step)
+            load = get_cpu_load(start, end, step=step)
             load = analyze(load)
         except Exception as e:
             logger.error(e)
@@ -232,9 +236,11 @@ def monitor_cpu():
 
             with open(tmp / LOAD_PLOT_FILENAME, 'rb') as photo:
                 bot.send_photo(
-                    chat_id=config["TELEGRAM_CHAT_ID"],
+                    chat_id=chat_id,
                     photo=photo,
-                    caption=f"{anomaly_type} detected! Current load: {round(latest_point['load'], 2)}%, Z-score: {round(latest_point['z_score'], 2)}"
+                    caption=f"{anomaly_type} detected! Current load: {round(latest_point['load'], 2)}%, Z-score: {round(latest_point['z_score'], 2)}\n" + \
+                            f"*{start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')}*",
+                    reply_markup=cpu_plot_markup
                 )
 
         sleep_wait_run()
