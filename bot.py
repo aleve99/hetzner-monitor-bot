@@ -1,33 +1,40 @@
 from datetime import datetime, timedelta
 from dotenv import dotenv_values
 from pathlib import Path
+from collections import deque
 
-from hcloud import Client
-from hcloud.servers.client import BoundServer
+import telebot
+from telebot import types
 
-import time, telebot, logging, threading, signal
+from get_stats import get_cpu_load, analyze, save_cpu_plot, MAX_METRICS_VALUES
+from get_text import get_cpu_stats_text
+
+import time, logging, threading, signal
 import pandas as pd
 import matplotlib.pyplot as plt
 
 plt.switch_backend('agg')
 
 RUNNING = True
-MAX_VALUES_MONITOR = 500
+CHECK_INTERVAL_S = 20
+LOAD_PLOT_FILENAME = "load.png"
 
 config = dotenv_values()
 
 tmp = Path("./tmp")
 
-if not tmp.exists():
-    tmp.mkdir()
+tmp.mkdir(exist_ok=True)
 
 bot = telebot.TeleBot(
     token=config["TELEGRAM_TOKEN"],
-    parse_mode="MARKDOWN"
+    parse_mode="Markdown"
 )
+
+messages: deque[int] = deque([], 10)
 
 chat_id = int(config['TELEGRAM_CHAT_ID'])
 
+telebot.logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
@@ -35,77 +42,176 @@ handler = logging.StreamHandler()
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-hetzner_client = Client(token=config["HCLOUD_TOKEN"])
-server = hetzner_client.servers.get_by_name(config["SERVER_NAME"])
+cpu_cmd = "\U0001F39B " + "CPU"
+disk_cmd = "\U0001F4BE " + "DISK"
+network_cmd = "\U0001F4E1 " + "NETWORK"
 
-@bot.message_handler(commands=["start", "help"])
-def send_welcome(message: telebot.types.Message):
+menu_markup = types.ReplyKeyboardMarkup()
+cpu_kb = types.KeyboardButton(cpu_cmd)
+disk_kb = types.KeyboardButton(disk_cmd)
+network_kb = types.KeyboardButton(network_cmd)
+menu_markup.row(cpu_kb, disk_kb, network_kb)
+
+menu_cmd = "\U0001F519 Back"
+cpu_plot_cmd = "\U0001F4C8 Plot"
+cpu_stats_menu_markup = types.ReplyKeyboardMarkup()
+cpu_stats_menu_markup.row(
+    types.KeyboardButton(cpu_plot_cmd),
+    types.KeyboardButton(menu_cmd)
+)
+
+cpu_stats_update_markup = types.InlineKeyboardMarkup()
+cpu_stats_update_markup.row(
+    types.InlineKeyboardButton(text=("Update"), callback_data="cpu_stats_update")
+)
+
+cpu_plot_markup = types.InlineKeyboardMarkup()
+cpu_plot_markup.row(
+    types.InlineKeyboardButton(text="30m", callback_data="cpuplot_30m"),
+    types.InlineKeyboardButton(text="1h", callback_data="cpuplot_1h"),
+    types.InlineKeyboardButton(text="3h", callback_data="cpuplot_3h"),
+    types.InlineKeyboardButton(text="6h", callback_data="cpuplot_6h"),
+    types.InlineKeyboardButton(text="12h", callback_data="cpuplot_12h"),
+    types.InlineKeyboardButton(text="1d", callback_data="cpuplot_1d")
+)
+
+disk_load = types.InlineKeyboardMarkup()
+disk_load.row(
+    types.InlineKeyboardButton(text="Plot")
+)
+
+disk_load_plot = types.InlineKeyboardMarkup()
+disk_load_plot.row(
+    types.InlineKeyboardButton(text=("30m"), callback_data="diskplot_30m"),
+    types.InlineKeyboardButton(text=("1h"), callback_data="diskplot_1h"),
+    types.InlineKeyboardButton(text=("3h"), callback_data="diskplot_3h"),
+    types.InlineKeyboardButton(text=("6h"), callback_data="diskplot_6h"),
+    types.InlineKeyboardButton(text=("12h"), callback_data="diskplot_12h"),
+    types.InlineKeyboardButton(text=("1d"), callback_data="diskplot_1d"),
+)
+
+network_load = types.InlineKeyboardMarkup()
+network_load.row(
+    types.InlineKeyboardButton(text="Plot")
+)
+
+network_load_plot = types.InlineKeyboardMarkup()
+network_load_plot.row(
+    types.InlineKeyboardButton(text=("30m"), callback_data="networkplot_30m"),
+    types.InlineKeyboardButton(text=("1h"), callback_data="networkplot_1h"),
+    types.InlineKeyboardButton(text=("3h"), callback_data="networkplot_3h"),
+    types.InlineKeyboardButton(text=("6h"), callback_data="networkplot_6h"),
+    types.InlineKeyboardButton(text=("12h"), callback_data="networkplot_12h"),
+    types.InlineKeyboardButton(text=("1d"), callback_data="networkplot_1d"),
+)
+
+@bot.message_handler(commands=["start"])
+def welcome_user(message: types.Message):
     if message.from_user.id == chat_id:
-        bot.send_message(chat_id, "Bot running!")
+        bot.send_message(chat_id, f"Hello, {message.from_user.full_name}!" ,reply_markup=menu_markup)
 
-def get_cpu_load(
-    server: BoundServer, 
-    start: datetime,
-    end: datetime, 
-    step: int | None = None
-) -> pd.DataFrame:
+@bot.message_handler(func=lambda message: message.text == menu_cmd)
+def main_menu(message: types.Message):
+    if message.from_user.id == chat_id:
+        bot.send_message(chat_id, f"Main menu:" ,reply_markup=menu_markup)
 
-    response = server.get_metrics(
-        type="cpu",
-        start=start,
-        end=end,
-        step=step
-    )
 
-    df = pd.DataFrame(
-        data=response.metrics.time_series['cpu']["values"],
-        columns=["datetime", "load"],
-        dtype="float"
-    )
-    
-    df['datetime'] = pd.to_datetime(
-        df['datetime'].astype(int), unit='s', utc=True
-    )
+@bot.message_handler(func=lambda message: message.text == cpu_cmd)
+def command_cpu(message: types.Message):
+    if message.from_user.id == chat_id:
+        bot.send_chat_action(message.from_user.id, action="typing")
+        
+        text = get_cpu_stats_text()
+        
+        bot.send_message(message.from_user.id, text=text, reply_markup=cpu_stats_update_markup)
+        bot.send_message(message.from_user.id, text="Cpu menu:", reply_markup=cpu_stats_menu_markup)
 
-    return df
+@bot.callback_query_handler(func=lambda call: call.data == "cpu_stats_update")
+def cpu_stats_update(call: types.CallbackQuery):
+    if call.from_user.id == chat_id:
+        text = get_cpu_stats_text()
+
+        bot.edit_message_text(text, call.from_user.id, call.message.id, reply_markup=cpu_stats_update_markup)
+
+@bot.message_handler(func=lambda message: message.text == cpu_plot_cmd)
+def cpu_plot(call: types.CallbackQuery):
+    if call.from_user.id == chat_id:
+        bot.send_chat_action(call.from_user.id, "upload_photo")
+        lookback_period_s = 30 * 60 # 30 minutes default
+        step = lookback_period_s // MAX_METRICS_VALUES
+        end = datetime.now().astimezone()
+        start = end - timedelta(seconds=lookback_period_s)
+
+        load = analyze(
+            get_cpu_load(start, end, step)
+        )
+
+        save_cpu_plot(tmp / LOAD_PLOT_FILENAME, load)
+        with open(tmp / LOAD_PLOT_FILENAME, 'rb') as image:
+            bot.send_photo(
+                chat_id=call.from_user.id,
+                photo=image,
+                caption=f"*{start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')}*",
+                reply_markup=cpu_plot_markup
+            )
+
+@bot.callback_query_handler(func=lambda call: isinstance(call.data, str) and call.data.startswith('cpuplot_'))
+def cpu_plot_update(call: types.CallbackQuery):
+    if call.from_user.id == chat_id:
+        p = call.data[-1]
+        n = int(call.data.split('_')[-1][:-1])
+        if p == "m": # case minutes
+            lookback_period_s = n * 60
+        elif p == "h": # case hours
+            lookback_period_s = n * 60 * 60
+        elif p == "d": # case days
+            lookback_period_s = n * 24 * 60 * 60
+        
+        step = lookback_period_s // MAX_METRICS_VALUES
+        end = datetime.now().astimezone()
+        start = end - timedelta(seconds=lookback_period_s)
+
+        load = analyze(
+            get_cpu_load(start, end, step)
+        )
+
+        save_cpu_plot(tmp / LOAD_PLOT_FILENAME, load)
+        with open(tmp / LOAD_PLOT_FILENAME, 'rb') as image:
+            bot.edit_message_media(
+                media=types.InputMediaPhoto(
+                    media=image,
+                    caption=f"*{start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')}*",
+                    parse_mode="Markdown"
+                ), 
+                chat_id=call.from_user.id, 
+                message_id=call.message.id,
+                reply_markup=cpu_plot_markup
+            )
+
+def sleep_wait_run():
+    i = 0
+    while RUNNING and i < CHECK_INTERVAL_S:
+        time.sleep(1)
+        i += 1
 
 def monitor_cpu():
-    filename_fig = "load_plot.png"
-    lookback_period_s = 3600  # 1 hour
-    step = lookback_period_s / MAX_VALUES_MONITOR  # 1 minute
-    window_size = 10  # 10-minute rolling window
+    lookback_period_s = 2000
+    step = lookback_period_s // MAX_METRICS_VALUES
 
     while RUNNING:
         past_end = datetime.now().astimezone()
         past_start = past_end - timedelta(seconds=lookback_period_s)
 
         try:
-            past_load = get_cpu_load(server, past_start, past_end, step=step)
-        except:
-            time.sleep(60)
+            load = get_cpu_load(past_start, past_end, step=step)
+            load = analyze(load)
+        except Exception as e:
+            logger.error(e)
+            sleep_wait_run()
             continue
-
-        # Calculate rolling statistics
-        past_load['rolling_mean'] = past_load['load'].rolling(window=window_size).mean()
-        past_load['rolling_std'] = past_load['load'].rolling(window=window_size).std()
-
-        # Calculate z-scores
-        past_load['z_score'] = (past_load['load'] - past_load['rolling_mean']) / past_load['rolling_std']
-
-        # Define anomaly thresholds
-        high_anomaly_threshold = 3  # Z-score threshold for high usage anomalies
-        low_anomaly_threshold = -2  # Z-score threshold for low usage anomalies
-        sustained_anomaly_threshold = 2  # Absolute Z-score threshold for sustained anomalies
-        sustained_period = 5  # Number of consecutive points to consider as a sustained anomaly
-
-        # Detect anomalies
-        past_load['is_high_anomaly'] = past_load['z_score'] > high_anomaly_threshold
-        past_load['is_low_anomaly'] = past_load['z_score'] < low_anomaly_threshold
-        past_load['is_anomaly'] = past_load['is_high_anomaly'] | past_load['is_low_anomaly']
-        past_load['is_sustained_anomaly'] = abs(past_load['z_score']).rolling(window=sustained_period).mean() > sustained_anomaly_threshold
-
+        
         # Check for anomalies in the most recent data point
-        latest_point = past_load.iloc[-1]
+        latest_point = load.iloc[-1]
         is_high_anomaly = latest_point['is_high_anomaly']
         is_low_anomaly = latest_point['is_low_anomaly']
         is_sustained_anomaly = latest_point['is_sustained_anomaly']
@@ -122,37 +228,18 @@ def monitor_cpu():
             
             logger.warning(f"{anomaly_type} detected in CPU usage!")
 
-            fig, ax = plt.subplots(figsize=(12, 6))
-            ax.plot(past_load['datetime'], past_load['load'], label='CPU Load')
-            ax.plot(past_load['datetime'], past_load['rolling_mean'], label='Rolling Mean', color='orange')
-            ax.fill_between(past_load['datetime'], 
-                            past_load['rolling_mean'] - 2*past_load['rolling_std'], 
-                            past_load['rolling_mean'] + 2*past_load['rolling_std'], 
-                            alpha=0.2, color='orange', label='2σ Range')
-            ax.scatter(past_load[past_load['is_high_anomaly']]['datetime'], 
-                       past_load[past_load['is_high_anomaly']]['load'], 
-                       color='red', label='High Anomalies')
-            ax.scatter(past_load[past_load['is_low_anomaly']]['datetime'], 
-                       past_load[past_load['is_low_anomaly']]['load'], 
-                       color='blue', label='Low Anomalies')
-            ax.set_title('CPU Load Over Time with Anomaly Detection')
-            ax.set_xlabel('Time')
-            ax.set_ylabel('CPU Load (%)')
-            ax.legend()
-            ax.grid(True)
-            fig.savefig(tmp / filename_fig)
-            plt.close(fig)
+            save_cpu_plot(tmp / LOAD_PLOT_FILENAME, load)
 
-            with open(tmp / filename_fig, 'rb') as photo:
+            with open(tmp / LOAD_PLOT_FILENAME, 'rb') as photo:
                 bot.send_photo(
                     chat_id=config["TELEGRAM_CHAT_ID"],
                     photo=photo,
                     caption=f"{anomaly_type} detected! Current load: {round(latest_point['load'], 2)}%, Z-score: {round(latest_point['z_score'], 2)}"
                 )
 
-        time.sleep(60)
+        sleep_wait_run()
     
-    logger.info("Closing monitor cpu")
+    logger.info(f"{threading.current_thread().name} closed!")
 
 def sigint_handler(signum, frame):
     global RUNNING
