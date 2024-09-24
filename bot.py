@@ -37,7 +37,7 @@ messages: deque[int] = deque([], 10)
 
 chat_id = int(config['TELEGRAM_CHAT_ID'])
 
-telebot.logger.setLevel(logging.DEBUG)
+telebot.logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
