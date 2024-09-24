@@ -138,9 +138,9 @@ def cpu_stats_update(call: types.CallbackQuery):
         bot.edit_message_text(text, call.from_user.id, call.message.id, reply_markup=cpu_stats_update_markup)
 
 @bot.message_handler(func=lambda message: message.text == cpu_plot_cmd)
-def cpu_plot(call: types.CallbackQuery):
-    if call.from_user.id == chat_id:
-        bot.send_chat_action(call.from_user.id, "upload_photo")
+def cpu_plot(message: types.Message):
+    if message.from_user.id == chat_id:
+        bot.send_chat_action(message.from_user.id, "upload_photo")
         lookback_period_s = 30 * 60 # 30 minutes default
         step = lookback_period_s // MAX_METRICS_VALUES
         end = datetime.now().astimezone()
@@ -153,7 +153,7 @@ def cpu_plot(call: types.CallbackQuery):
         save_cpu_plot(tmp / LOAD_PLOT_FILENAME, load)
         with open(tmp / LOAD_PLOT_FILENAME, 'rb') as image:
             bot.send_photo(
-                chat_id=call.from_user.id,
+                chat_id=message.from_user.id,
                 photo=image,
                 caption=f"*{start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')}*",
                 reply_markup=cpu_plot_markup
@@ -161,6 +161,7 @@ def cpu_plot(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: isinstance(call.data, str) and call.data.startswith('cpuplot_'))
 def cpu_plot_update(call: types.CallbackQuery):
+    bot.send_chat_action(call.from_user.id, "upload_photo")
     if call.from_user.id == chat_id:
         p = call.data[-1]
         n = int(call.data.split('_')[-1][:-1])
@@ -207,7 +208,7 @@ def monitor_cpu():
         start = end - timedelta(seconds=lookback_period_s)
 
         try:
-            load = get_cpu_load(start, end, step=step)
+            load = get_cpu_load(start, end, step)
             load = analyze(load)
         except Exception as e:
             logger.error(e)
@@ -226,7 +227,7 @@ def monitor_cpu():
             if is_high_anomaly:
                 anomaly_type = "High CPU usage spike"
             elif is_low_anomaly:
-                anomaly_type = "Low CPU usage detected"
+                anomaly_type = "Low CPU usage"
             else:
                 anomaly_type = "Sustained unusual behavior"
             
