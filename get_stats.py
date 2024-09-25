@@ -17,7 +17,7 @@ SIGMA = 3
 HIGH_ANOMALY_THRESHOLD = SIGMA  # Z-score threshold for high usage anomalies
 LOW_ANOMALY_THRESHOLD = -SIGMA  # Z-score threshold for low usage anomalies
 SUSTAINED_ANOMALY_THRESHOLD = 2  # Absolute Z-score threshold for sustained anomalies
-SUSTAINED_PERIOD = 10  # Number of consecutive points to consider as a sustained anomaly
+SUSTAINED_PERIOD = 20  # Number of consecutive points to consider as a sustained anomaly
 
 config = dotenv_values()
 
