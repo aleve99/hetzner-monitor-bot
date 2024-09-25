@@ -10,12 +10,13 @@ import pandas as pd
 
 
 MAX_METRICS_VALUES = 500
-WINDOW_SIZE = 20
+WINDOW_SIZE = 15
 
 # Define anomaly thresholds
-SIGMA = 3
-HIGH_ANOMALY_THRESHOLD = SIGMA  # Z-score threshold for high usage anomalies
-LOW_ANOMALY_THRESHOLD = -SIGMA  # Z-score threshold for low usage anomalies
+SIGMA_HIGH = 3.2
+SIGMA_LOW = 2.5
+HIGH_ANOMALY_THRESHOLD = SIGMA_HIGH  # Z-score threshold for high usage anomalies
+LOW_ANOMALY_THRESHOLD = -SIGMA_LOW  # Z-score threshold for low usage anomalies
 SUSTAINED_ANOMALY_THRESHOLD = 2  # Absolute Z-score threshold for sustained anomalies
 SUSTAINED_PERIOD = 10  # Number of consecutive points to consider as a sustained anomaly
 
@@ -82,7 +83,7 @@ def save_cpu_plot(path: Path, df: pd.DataFrame) -> None:
     ax.fill_between(tdf['datetime'], 
                     tdf['rolling_mean'] - 2*tdf['rolling_std'], 
                     tdf['rolling_mean'] + 2*tdf['rolling_std'], 
-                    alpha=0.2, color='orange', label=f'{SIGMA}σ Range')
+                    alpha=0.2, color='orange', label=f'[-{SIGMA_LOW}σ,+{SIGMA_HIGH}σ] Range')
     ax.scatter(tdf[tdf['is_high_anomaly']]['datetime'], 
                tdf[tdf['is_high_anomaly']]['cpu'], 
                color='red', label='High Anomalies')
@@ -169,8 +170,9 @@ if __name__ == "__main__":
     from datetime import timedelta
 
     end = datetime.now().astimezone()
-    start = end - timedelta(minutes=10)
+    start = end - timedelta(minutes=120)
 
-    df = get_stats('disk', start, end)
-    save_disk_plot("disk.png", df)
+    df = get_stats('cpu', start, end)
+    df = analyze(get_stats('cpu', start, end), 'cpu')
+    save_cpu_plot("cpu.png", df)
     print(df)
