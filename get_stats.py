@@ -13,8 +13,8 @@ MAX_METRICS_VALUES = 500
 WINDOW_SIZE = 15
 
 # Define anomaly thresholds
-SIGMA_HIGH = 3.2
-SIGMA_LOW = 2.5
+SIGMA_HIGH = 3.5
+SIGMA_LOW = 3
 HIGH_ANOMALY_THRESHOLD = SIGMA_HIGH  # Z-score threshold for high usage anomalies
 LOW_ANOMALY_THRESHOLD = -SIGMA_LOW  # Z-score threshold for low usage anomalies
 SUSTAINED_ANOMALY_THRESHOLD = 2  # Absolute Z-score threshold for sustained anomalies
@@ -53,7 +53,7 @@ def get_stats(
 
     df['datetime'] = pd.to_datetime(
         df['datetime'].astype(int), unit='s', utc=True
-    )
+    ).dt.tz_convert('Europe/Rome')
 
     return df
 
@@ -169,10 +169,12 @@ def save_network_plot(path: Path, df: pd.DataFrame) -> None:
 if __name__ == "__main__":
     from datetime import timedelta
 
+    lookback_s = 20000
+
     end = datetime.now().astimezone()
-    start = end - timedelta(minutes=120)
+    start = end - timedelta(seconds=lookback_s)
 
     df = get_stats('cpu', start, end)
-    df = analyze(get_stats('cpu', start, end), 'cpu')
-    save_cpu_plot("cpu.png", df)
+    df = analyze(get_stats('cpu', start, end, lookback_s//MAX_METRICS_VALUES), 'cpu')
+    save_cpu_plot("tmp/cpu.png", df)
     print(df)
