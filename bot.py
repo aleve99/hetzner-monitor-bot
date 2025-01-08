@@ -390,7 +390,11 @@ def monitor_cpu():
             sleep_wait_run()
             continue
         
-        # Check for anomalies in the most recent data point
+        if load.empty:
+            logger.warning("No data available for CPU usage analysis.")
+            sleep_wait_run()
+            continue
+        
         latest_point = load.iloc[-1]
         is_high_anomaly = latest_point['is_high_anomaly']
         is_low_anomaly = latest_point['is_low_anomaly']
